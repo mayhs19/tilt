@@ -13,12 +13,15 @@ type DisableSubscriber struct {
 	dcc dockercompose.DockerComposeClient
 }
 
+// How does the `New` function relate to the subscriber we're creating?
 func NewDisableEventWatcher(dcc dockercompose.DockerComposeClient) *EventWatcher {
 	return &EventWatcher{
 		dcc: dcc,
 	}
 }
 
+// Question for Matt: how is the `DisableSubscriber` typed as a subscriber? Is Go just smart enough to know that the `OnChange` method is part of the Subscriber interface type?
+// ...is it because interfaces are implemented implicitly? (So says the Go documentation, lol)
 func (w *DisableSubscriber) OnChange(ctx context.Context, st store.RStore, summary store.ChangeSummary) error {
 	if summary.IsLogOnly() {
 		return nil
@@ -32,6 +35,7 @@ func (w *DisableSubscriber) OnChange(ctx context.Context, st store.RStore, summa
 		return nil
 	}
 
+	var specsToDisable []model.DockerComposeUpSpec
 	for _, uir := range state.UIResources {
 		if uir.Status.DisableStatus.DisabledCount > 0 {
 			manifest, exists := state.ManifestTargets[model.ManifestName(uir.Name)]
@@ -39,15 +43,22 @@ func (w *DisableSubscriber) OnChange(ctx context.Context, st store.RStore, summa
 				continue
 			}
 
-			if manifest.State.IsDC() {
+			if !manifest.State.IsDC() {
 				continue
 			}
 
 			rs := manifest.State.DCRuntimeState().RuntimeStatus()
 			if rs == v1alpha1.RuntimeStatusOK || rs == v1alpha1.RuntimeStatusPending {
-				// TODO: Add support to dcClient.Down to take a list of specs to `down`, rather than a project
-				// w.dcc.Down()
+				dcSpec := model.DockerComposeUpSpec{
+					Service: string(manifest.State.Name),
+					Project: manifest.Manifest.DockerComposeTarget().Spec.Project,
+				}
+				specsToDisable = append(specsToDisable, dcSpec)
 			}
+		}
+
+		if len(specsToDisable) > 0 {
+			// Call `down` from dcc!
 		}
 	}
 
